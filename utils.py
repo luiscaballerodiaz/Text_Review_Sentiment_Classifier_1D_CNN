@@ -29,17 +29,24 @@ def test_set_prediction(x_train, y_train, x_test, x_test_keras, y_test, model_to
     print('CNN MODEL TEST SCORE: {:.4f}'.format(model.evaluate(x_test_keras, y_test, batch_size=batch_size)[1]))
     cnn_preds = model.predict(x_test_keras, batch_size=1)
 
-    ok = 0
-    y_model = []
-    for i in range(len(y_test)):
-        y_pred = (1 / 3) * cnn_preds[i] + (1 / 3) * linearsvc_preds[i] + (1 / 3) * logreg_preds[i]
-        if y_pred >= 0.5:
-            y_model.append(1)
-        else:
-            y_model.append(0)
-        if y_model[i] == y_test[i]:
-            ok += 1
-    print('ENSEMBLED MODEL TEST SCORE: {:.4f}'.format(ok / len(y_test)))
+    for h in range(2):
+        ok = 0
+        y_model = []
+        for i in range(len(y_test)):
+            if h == 0:
+                y_pred = (1 / 3) * cnn_preds[i] + (1 / 3) * linearsvc_preds[i] + (1 / 3) * logreg_preds[i]
+            elif h == 1:
+                y_pred = (1 / 2) * linearsvc_preds[i] + (1 / 2) * logreg_preds[i]
+            if y_pred >= 0.5:
+                y_model.append(1)
+            else:
+                y_model.append(0)
+            if y_model[i] == y_test[i]:
+                ok += 1
+        if h == 0:
+            print('ENSEMBLE LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(ok / len(y_test)))
+        elif h == 1:
+            print('ENSEMBLE 1D CNN + LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(ok / len(y_test)))
 
 
 def sweep_linear_models(x_train, y_train):
@@ -61,6 +68,7 @@ def sweep_linear_models(x_train, y_train):
     print("Best cross-validation score: {:.4f}".format(grid_search.best_score_))
     print(pd.DataFrame(grid_search.cv_results_)[['mean_test_score', 'params']])
 
+
 def create_1D_CNN(dropout, l2_reg, learning_rate, vocabulary_words, max_words_review):
     model = models.Sequential()
     model.add(layers.Embedding(vocabulary_words, 128, input_length=max_words_review))
@@ -77,6 +85,8 @@ def create_1D_CNN(dropout, l2_reg, learning_rate, vocabulary_words, max_words_re
     model.compile(optimizer=optimizers.RMSprop(learning_rate=learning_rate), loss='binary_crossentropy',
                   metrics=['acc'])
     model.summary()
+    return model
+
 
 def dataframe_modification_and_split(df, visualization, max_words_review, vocabulary_words):
     df = df[df['Rating'] != 3].reset_index(drop=True)

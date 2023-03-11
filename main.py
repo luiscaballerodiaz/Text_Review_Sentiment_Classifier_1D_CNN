@@ -11,7 +11,7 @@ action = 2
 # 2 --> load CNN neural network, simulate optimal lineal models and ensembled them
 epochs = 40
 learning_rate = 0.0001
-dropout = 0.5
+dropout = 0.6
 l2_reg = 0.1
 batch_size = 32
 vocabulary_words = 10000
@@ -20,7 +20,7 @@ model_to_load = 'CNN network dropout=0.5 l2 reg=0.15 - Trained model.h5'
 
 visualization = DataPlots()
 source_df = pd.read_csv('tripadvisor_hotel_reviews.csv')
-# utils.data_analytics(source_df, visualization)
+utils.data_analytics(source_df, visualization)
 x_train, x_test, y_train, y_test, x_train_keras, x_val_keras, y_train2, y_val, x_test_keras =\
     utils.dataframe_modification_and_split(source_df, visualization, max_words_review, vocabulary_words)
 
