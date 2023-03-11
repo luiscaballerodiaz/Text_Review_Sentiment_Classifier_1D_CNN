@@ -1,9 +1,82 @@
 from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.svm import LinearSVC
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import train_test_split
 from keras.utils import pad_sequences
 from keras import layers
+from keras import models
+from keras import optimizers
+from keras import regularizers
+import pandas as pd
 import numpy as np
 
+
+def test_set_prediction(x_train, y_train, x_test, x_test_keras, y_test, model_to_load, batch_size):
+    model = LinearSVC(C=0.01, random_state=0, dual=False)
+    model = CalibratedClassifierCV(model)
+    model.fit(x_train, y_train)
+    print('LINEARSVC MODEL TEST SCORE: {:.4f}'.format(model.score(x_test, y_test)))
+    linearsvc_preds = model.predict_proba(x_test)[:, 1]
+
+    model = LogisticRegression(C=0.1, random_state=0)
+    model.fit(x_train, y_train)
+    print('LOGISTIC REGRESSION MODEL TEST SCORE: {:.4f}'.format(model.score(x_test, y_test)))
+    logreg_preds = model.predict_proba(x_test)[:, 1]
+
+    model = models.load_model(model_to_load)
+    print('CNN MODEL TEST SCORE: {:.4f}'.format(model.evaluate(x_test_keras, y_test, batch_size=batch_size)[1]))
+    cnn_preds = model.predict(x_test_keras, batch_size=1)
+
+    ok = 0
+    y_model = []
+    for i in range(len(y_test)):
+        y_pred = (1 / 3) * cnn_preds[i] + (1 / 3) * linearsvc_preds[i] + (1 / 3) * logreg_preds[i]
+        if y_pred >= 0.5:
+            y_model.append(1)
+        else:
+            y_model.append(0)
+        if y_model[i] == y_test[i]:
+            ok += 1
+    print('ENSEMBLED MODEL TEST SCORE: {:.4f}'.format(ok / len(y_test)))
+
+
+def sweep_linear_models(x_train, y_train):
+    model = LinearSVC(random_state=0, dual=False)
+    param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100]}
+    grid_search = GridSearchCV(model, param_grid, cv=5)
+    grid_search.fit(x_train, y_train)
+    print('LINEAR SVC')
+    print("Best parameters: {}".format(grid_search.best_params_))
+    print("Best cross-validation score: {:.4f}".format(grid_search.best_score_))
+    print(pd.DataFrame(grid_search.cv_results_)[['mean_test_score', 'params']])
+
+    model = LogisticRegression(random_state=0)
+    param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100]}
+    grid_search = GridSearchCV(model, param_grid, cv=5)
+    grid_search.fit(x_train, y_train)
+    print('LOGISTIC REGRESSION')
+    print("Best parameters: {}".format(grid_search.best_params_))
+    print("Best cross-validation score: {:.4f}".format(grid_search.best_score_))
+    print(pd.DataFrame(grid_search.cv_results_)[['mean_test_score', 'params']])
+
+def create_1D_CNN(dropout, l2_reg, learning_rate, vocabulary_words, max_words_review):
+    model = models.Sequential()
+    model.add(layers.Embedding(vocabulary_words, 128, input_length=max_words_review))
+    model.add(layers.Dropout(dropout))
+    model.add(layers.Conv1D(32, 7, activation='relu', kernel_regularizer=regularizers.l2(l2_reg)))
+    model.add(layers.BatchNormalization())
+    model.add(layers.Dropout(dropout))
+    model.add(layers.MaxPooling1D(3))
+    model.add(layers.Conv1D(32, 7, activation='relu', kernel_regularizer=regularizers.l2(l2_reg)))
+    model.add(layers.BatchNormalization())
+    model.add(layers.Dropout(dropout))
+    model.add(layers.GlobalMaxPooling1D())
+    model.add(layers.Dense(1, activation='sigmoid'))
+    model.compile(optimizer=optimizers.RMSprop(learning_rate=learning_rate), loss='binary_crossentropy',
+                  metrics=['acc'])
+    model.summary()
 
 def dataframe_modification_and_split(df, visualization, max_words_review, vocabulary_words):
     df = df[df['Rating'] != 3].reset_index(drop=True)
