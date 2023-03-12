@@ -122,3 +122,19 @@ class DataPlots:
         plt.savefig('Results ' + tag + '.png', bbox_inches='tight')
         plt.close()
 
+    def linearmodels_coeffs_plot(self, tag, max_feats, max_coeffs, min_feats, min_coeffs):
+        fig, axes = plt.subplots(1, 2, figsize=(self.fig_width, self.fig_height))
+        ax = axes.ravel()
+        ax[0].barh(range(1, len(max_coeffs) + 1), max_coeffs, color='b', height=0.25, edgecolor='black')
+        ax[0].set_yticks(range(1, len(max_feats) + 1), max_feats, va='center', rotation=0)
+        ax[1].barh(range(1, len(min_coeffs) + 1), min_coeffs, color='r', height=0.25, edgecolor='black')
+        ax[1].set_yticks(range(1, len(min_feats) + 1), min_feats, va='center', rotation=0)
+        for i in range(2):
+            ax[i].grid(visible=True)
+            ax[i].set_xlabel('Coefficients', fontsize=14)
+            ax[i].set_ylabel('Feature names', fontsize=14)
+        fig.suptitle(tag + ' coefficient analysis', fontweight='bold', fontsize=24)
+        fig.tight_layout()
+        plt.savefig(tag + ' coefficient analysis.png', bbox_inches='tight')
+        plt.close()
+

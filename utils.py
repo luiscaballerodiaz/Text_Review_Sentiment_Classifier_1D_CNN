@@ -13,6 +13,30 @@ import pandas as pd
 import numpy as np
 
 
+def linearmodels_coeffs_analysis(visualization, x_train, y_train, features, words=25):
+    for sim in range(2):
+        if sim == 0:
+            model = LogisticRegression(C=0.1, random_state=0)
+            tag = 'Logistic regression'
+        elif sim == 1:
+            model = LinearSVC(C=0.01, random_state=0, dual=False)
+            tag = 'Linear SVC'
+        model.fit(x_train, y_train)
+        coeffs = model.coef_
+        max_ind = np.argsort(-coeffs)[:words]
+        min_ind = np.argsort(coeffs)[:words]
+        max_coeffs = []
+        min_coeffs = []
+        max_feats = []
+        min_feats = []
+        for i in range(words):
+            max_coeffs.append(coeffs[0][max_ind[0][i]])
+            min_coeffs.append(coeffs[0][min_ind[0][i]])
+            max_feats.append([key for key, value in features.items() if value == max_ind[0][i]])
+            min_feats.append([key for key, value in features.items() if value == min_ind[0][i]])
+        visualization.linearmodels_coeffs_plot(tag, max_feats, max_coeffs, min_feats, min_coeffs)
+
+
 def test_set_prediction(x_train, y_train, x_test, x_test_keras, y_test, model_to_load, batch_size):
     model = LinearSVC(C=0.01, random_state=0, dual=False)
     model = CalibratedClassifierCV(model)
@@ -105,21 +129,22 @@ def dataframe_modification_and_split(df, visualization, max_words_review, vocabu
     visualization.pie_plot(['positive', 'negative'], [sum(y_test), len(y_test)-sum(y_test)], 'Sentiment', 'test set')
     visualization.pie_plot(['positive', 'negative'], [sum(y_val), len(y_val) - sum(y_val)], 'Sentiment', 'val set')
 
-    one_hot = layers.Hashing(num_bins=vocabulary_words, output_mode='int')
-    x_train_enc = [one_hot(review.split()) for review in x_train2]
+    hashing = layers.Hashing(num_bins=vocabulary_words, output_mode='int')
+    x_train_enc = [hashing(review.split()) for review in x_train2]
     x_train_keras = pad_sequences(x_train_enc, maxlen=max_words_review, padding='post')
-    x_val_enc = [one_hot(review.split()) for review in x_val]
+    x_val_enc = [hashing(review.split()) for review in x_val]
     x_val_keras = pad_sequences(x_val_enc, maxlen=max_words_review, padding='post')
-    x_test_enc = [one_hot(review.split()) for review in x_test]
+    x_test_enc = [hashing(review.split()) for review in x_test]
     x_test_keras = pad_sequences(x_test_enc, maxlen=max_words_review, padding='post')
 
     vect = CountVectorizer(min_df=10, max_df=0.75, stop_words='english')
     vect.fit(x_train)
     x_train = vect.transform(x_train).toarray()
     x_test = vect.transform(x_test).toarray()
+    features = vect.vocabulary_
     y_test = y_test.reset_index(drop=True)
 
-    return x_train, x_test, y_train, y_test, x_train_keras, x_val_keras, y_train2, y_val, x_test_keras
+    return x_train, x_test, y_train, y_test, x_train_keras, x_val_keras, y_train2, y_val, x_test_keras, features
 
 
 def data_analytics(df, visualization):
