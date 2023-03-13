@@ -9,8 +9,42 @@ from keras import layers
 from keras import models
 from keras import optimizers
 from keras import regularizers
+from scipy.optimize import minimize
 import pandas as pd
 import numpy as np
+
+
+def minimize_acc(weights, y_true, y_preds):
+    """ Calculate the score of a weighted model predictions"""
+    return -accuracy_score(weights, y_true, y_preds)
+
+
+def accuracy_score(weights, y_true, y_preds):
+    ok = 0
+    for i in range(len(y_true)):
+        y_pred = np.round(np.dot(y_preds[i], weights))
+        if y_pred == y_true[i]:
+            ok += 1
+    return ok / len(y_true)
+
+
+def calculate_optimal_weights(y_true, y_preds):
+    acc_opt = 100
+    acc_weights_opt = 0
+    for i in range(20):
+        weights_ini = np.random.rand(y_preds.shape[1])
+        weights_ini /= np.sum(weights_ini)
+        acc_minimizer = minimize(fun=minimize_acc,
+                                 x0=weights_ini,
+                                 method='SLSQP',
+                                 args=(y_true, y_preds),
+                                 bounds=[(0, 1)] * y_preds.shape[1],
+                                 options={'disp': True, 'maxiter': 10000, 'eps': 1e-10, 'ftol': 1e-8},
+                                 constraints={'type': 'eq', 'fun': lambda w: w.sum() - 1})
+        if acc_minimizer.fun < acc_opt:
+            acc_opt = acc_minimizer.fun
+            acc_weights_opt = acc_minimizer.x
+    return acc_weights_opt
 
 
 def linearmodels_coeffs_analysis(visualization, x_train, y_train, features, words=25):
@@ -37,40 +71,40 @@ def linearmodels_coeffs_analysis(visualization, x_train, y_train, features, word
         visualization.linearmodels_coeffs_plot(tag, max_feats, max_coeffs, min_feats, min_coeffs)
 
 
-def test_set_prediction(x_train, y_train, x_test, x_test_keras, y_test, model_to_load, batch_size):
+def test_set_prediction(x_train, y_train, x_test, x_test_keras, y_test, x_val, x_val_keras, y_val, load, batch_size):
     model = LinearSVC(C=0.01, random_state=0, dual=False)
     model = CalibratedClassifierCV(model)
     model.fit(x_train, y_train)
     print('LINEARSVC MODEL TEST SCORE: {:.4f}'.format(model.score(x_test, y_test)))
-    linearsvc_preds = model.predict_proba(x_test)[:, 1]
+    linearsvc_val_preds = model.predict_proba(x_val)[:, 1].reshape(-1, 1)
+    linearsvc_test_preds = model.predict_proba(x_test)[:, 1].reshape(-1, 1)
 
     model = LogisticRegression(C=0.1, random_state=0)
     model.fit(x_train, y_train)
     print('LOGISTIC REGRESSION MODEL TEST SCORE: {:.4f}'.format(model.score(x_test, y_test)))
-    logreg_preds = model.predict_proba(x_test)[:, 1]
+    logreg_val_preds = model.predict_proba(x_val)[:, 1].reshape(-1, 1)
+    logreg_test_preds = model.predict_proba(x_test)[:, 1].reshape(-1, 1)
 
-    model = models.load_model(model_to_load)
+    model = models.load_model(load)
     print('CNN MODEL TEST SCORE: {:.4f}'.format(model.evaluate(x_test_keras, y_test, batch_size=batch_size)[1]))
-    cnn_preds = model.predict(x_test_keras, batch_size=1)
+    cnn_val_preds = model.predict(x_val_keras, batch_size=1)
+    cnn_test_preds = model.predict(x_test_keras, batch_size=1)
 
-    for h in range(2):
-        ok = 0
-        y_model = []
-        for i in range(len(y_test)):
-            if h == 0:
-                y_pred = (1 / 3) * cnn_preds[i] + (1 / 3) * linearsvc_preds[i] + (1 / 3) * logreg_preds[i]
-            elif h == 1:
-                y_pred = (1 / 2) * linearsvc_preds[i] + (1 / 2) * logreg_preds[i]
-            if y_pred >= 0.5:
-                y_model.append(1)
-            else:
-                y_model.append(0)
-            if y_model[i] == y_test[i]:
-                ok += 1
-        if h == 0:
-            print('ENSEMBLE LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(ok / len(y_test)))
-        elif h == 1:
-            print('ENSEMBLE 1D CNN + LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(ok / len(y_test)))
+    y_test = np.array(y_test)
+    y_val = np.array(y_val)
+    y_val_preds = np.c_[linearsvc_val_preds, logreg_val_preds, cnn_val_preds]
+    y_test_preds = np.c_[linearsvc_test_preds, logreg_test_preds, cnn_test_preds]
+    opt_weights = calculate_optimal_weights(y_val, y_val_preds)
+    acc_ensemble_pred = accuracy_score(opt_weights, y_test, y_test_preds)
+    print('\nENSEMBLE 1D CNN + LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(acc_ensemble_pred))
+    print('\nOPTIMAL WEIGHTS: {}'.format(opt_weights))
+
+    y_val_preds = np.c_[linearsvc_val_preds, logreg_val_preds]
+    y_test_preds = np.c_[linearsvc_test_preds, logreg_test_preds]
+    opt_weights = calculate_optimal_weights(y_val, y_val_preds)
+    acc_linear_pred = accuracy_score(opt_weights, y_test, y_test_preds)
+    print('\nENSEMBLE LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(acc_linear_pred))
+    print('\nOPTIMAL WEIGHTS: {}'.format(opt_weights))
 
 
 def sweep_linear_models(x_train, y_train):
@@ -141,10 +175,14 @@ def dataframe_modification_and_split(df, visualization, max_words_review, vocabu
     vect.fit(x_train)
     x_train = vect.transform(x_train).toarray()
     x_test = vect.transform(x_test).toarray()
+    x_val = vect.transform(x_val).toarray()
     features = vect.vocabulary_
     y_test = y_test.reset_index(drop=True)
+    y_val = y_val.reset_index(drop=True)
+    y_train = y_train.reset_index(drop=True)
+    y_train2 = y_train2.reset_index(drop=True)
 
-    return x_train, x_test, y_train, y_test, x_train_keras, x_val_keras, y_train2, y_val, x_test_keras, features
+    return x_train, x_test, x_val, y_train, y_test, x_train_keras, x_val_keras, y_train2, y_val, x_test_keras, features
 
 
 def data_analytics(df, visualization):
@@ -198,7 +236,6 @@ def data_analytics(df, visualization):
 
     set1 = set(features[0])
     set2 = set(features[1])
-    set3 = set(features[2])
     set4 = set(features[3])
     set5 = set(features[4])
 
