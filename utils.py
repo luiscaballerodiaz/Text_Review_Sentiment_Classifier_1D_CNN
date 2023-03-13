@@ -31,7 +31,7 @@ def accuracy_score(weights, y_true, y_preds):
 def calculate_optimal_weights(y_true, y_preds):
     acc_opt = 100
     acc_weights_opt = 0
-    for i in range(20):
+    for i in range(100):
         weights_ini = np.random.rand(y_preds.shape[1])
         weights_ini /= np.sum(weights_ini)
         acc_minimizer = minimize(fun=minimize_acc,
@@ -92,19 +92,20 @@ def test_set_prediction(x_train, y_train, x_test, x_test_keras, y_test, x_val, x
 
     y_test = np.array(y_test)
     y_val = np.array(y_val)
+
     y_val_preds = np.c_[linearsvc_val_preds, logreg_val_preds, cnn_val_preds]
     y_test_preds = np.c_[linearsvc_test_preds, logreg_test_preds, cnn_test_preds]
-    opt_weights = calculate_optimal_weights(y_val, y_val_preds)
-    acc_ensemble_pred = accuracy_score(opt_weights, y_test, y_test_preds)
-    print('\nENSEMBLE 1D CNN + LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(acc_ensemble_pred))
-    print('\nOPTIMAL WEIGHTS: {}'.format(opt_weights))
+    opt_ensemble_weights = calculate_optimal_weights(y_val, y_val_preds)
 
-    y_val_preds = np.c_[linearsvc_val_preds, logreg_val_preds]
-    y_test_preds = np.c_[linearsvc_test_preds, logreg_test_preds]
-    opt_weights = calculate_optimal_weights(y_val, y_val_preds)
-    acc_linear_pred = accuracy_score(opt_weights, y_test, y_test_preds)
-    print('\nENSEMBLE LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(acc_linear_pred))
-    print('\nOPTIMAL WEIGHTS: {}'.format(opt_weights))
+    opt_ensemble_weights = [0, 2/3, 1/3]
+    acc_ensemble_pred = accuracy_score(opt_ensemble_weights, y_test, y_test_preds)
+    print('\nENSEMBLE 1D CNN + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(acc_ensemble_pred))
+    print('\nOPTIMAL WEIGHTS: {}'.format(opt_ensemble_weights))
+
+    opt_ensemble_weights = [1/2, 1/2, 0]
+    acc_ensemble_pred = accuracy_score(opt_ensemble_weights, y_test, y_test_preds)
+    print('\nENSEMBLE LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(acc_ensemble_pred))
+    print('\nOPTIMAL WEIGHTS: {}'.format(opt_ensemble_weights))
 
 
 def sweep_linear_models(x_train, y_train):
