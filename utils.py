@@ -14,11 +14,6 @@ import pandas as pd
 import numpy as np
 
 
-def minimize_acc(weights, y_true, y_preds):
-    """ Calculate the score of a weighted model predictions"""
-    return -accuracy_score(weights, y_true, y_preds)
-
-
 def accuracy_score(weights, y_true, y_preds):
     ok = 0
     for i in range(len(y_true)):
@@ -28,26 +23,31 @@ def accuracy_score(weights, y_true, y_preds):
     return ok / len(y_true)
 
 
-def calculate_optimal_weights(y_true, y_preds):
+def minimize_acc(weights, y_true, y_preds):
+    """ Calculate the score of a weighted model predictions"""
+    return -accuracy_score(weights, y_true, y_preds)
+
+
+def calculate_optimal_weights(y_true, y_preds, sims):
     acc_opt = 100
     acc_weights_opt = 0
-    for i in range(100):
+    for i in range(sims):
         weights_ini = np.random.rand(y_preds.shape[1])
-        weights_ini /= np.sum(weights_ini)
+        weights_ini /= sum(weights_ini)
         acc_minimizer = minimize(fun=minimize_acc,
                                  x0=weights_ini,
-                                 method='SLSQP',
+                                 method='trust-constr',
                                  args=(y_true, y_preds),
                                  bounds=[(0, 1)] * y_preds.shape[1],
-                                 options={'disp': True, 'maxiter': 10000, 'eps': 1e-10, 'ftol': 1e-8},
+                                 options={'disp': True, 'maxiter': 10000},
                                  constraints={'type': 'eq', 'fun': lambda w: w.sum() - 1})
         if acc_minimizer.fun < acc_opt:
             acc_opt = acc_minimizer.fun
             acc_weights_opt = acc_minimizer.x
-    return acc_weights_opt
+    return acc_weights_opt, -acc_opt
 
 
-def linearmodels_coeffs_analysis(visualization, x_train, y_train, features, words=25):
+def linearmodels_coeffs_analysis(visualization, x, y, features, words=25):
     for sim in range(2):
         if sim == 0:
             model = LogisticRegression(C=0.1, random_state=0)
@@ -55,7 +55,7 @@ def linearmodels_coeffs_analysis(visualization, x_train, y_train, features, word
         elif sim == 1:
             model = LinearSVC(C=0.01, random_state=0, dual=False)
             tag = 'Linear SVC'
-        model.fit(x_train, y_train)
+        model.fit(x, y)
         coeffs = model.coef_
         max_ind = np.argsort(-coeffs)[:words]
         min_ind = np.argsort(coeffs)[:words]
@@ -71,48 +71,61 @@ def linearmodels_coeffs_analysis(visualization, x_train, y_train, features, word
         visualization.linearmodels_coeffs_plot(tag, max_feats, max_coeffs, min_feats, min_coeffs)
 
 
-def test_set_prediction(x_train, y_train, x_test, x_test_keras, y_test, x_val, x_val_keras, y_val, load, batch_size):
+def test_set_prediction(x_trainval, y_trainval, x_test, x_test_keras, y_test, x_val, x_val_keras, y_val, load, batch):
     model = LinearSVC(C=0.01, random_state=0, dual=False)
     model = CalibratedClassifierCV(model)
-    model.fit(x_train, y_train)
+    model.fit(x_trainval, y_trainval)
     print('LINEARSVC MODEL TEST SCORE: {:.4f}'.format(model.score(x_test, y_test)))
     linearsvc_val_preds = model.predict_proba(x_val)[:, 1].reshape(-1, 1)
     linearsvc_test_preds = model.predict_proba(x_test)[:, 1].reshape(-1, 1)
 
     model = LogisticRegression(C=0.1, random_state=0)
-    model.fit(x_train, y_train)
+    model.fit(x_trainval, y_trainval)
     print('LOGISTIC REGRESSION MODEL TEST SCORE: {:.4f}'.format(model.score(x_test, y_test)))
     logreg_val_preds = model.predict_proba(x_val)[:, 1].reshape(-1, 1)
     logreg_test_preds = model.predict_proba(x_test)[:, 1].reshape(-1, 1)
 
     model = models.load_model(load)
-    print('CNN MODEL TEST SCORE: {:.4f}'.format(model.evaluate(x_test_keras, y_test, batch_size=batch_size)[1]))
+    print('CNN MODEL TEST SCORE: {:.4f}'.format(model.evaluate(x_test_keras, y_test, batch_size=batch)[1]))
     cnn_val_preds = model.predict(x_val_keras, batch_size=1)
     cnn_test_preds = model.predict(x_test_keras, batch_size=1)
 
     y_test = np.array(y_test)
     y_val = np.array(y_val)
 
-    y_val_preds = np.c_[linearsvc_val_preds, logreg_val_preds, cnn_val_preds]
-    y_test_preds = np.c_[linearsvc_test_preds, logreg_test_preds, cnn_test_preds]
-    opt_ensemble_weights = calculate_optimal_weights(y_val, y_val_preds)
+    y_val_preds = np.c_[linearsvc_val_preds, cnn_val_preds]
+    y_test_preds = np.c_[linearsvc_test_preds, cnn_test_preds]
+    opt_weights0, acc_val0 = calculate_optimal_weights(y_val, y_val_preds, 500)
+    acc_test0 = accuracy_score(opt_weights0, y_test, y_test_preds)
 
-    opt_ensemble_weights = [0, 2/3, 1/3]
-    acc_ensemble_pred = accuracy_score(opt_ensemble_weights, y_test, y_test_preds)
-    print('\nENSEMBLE 1D CNN + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(acc_ensemble_pred))
-    print('\nOPTIMAL WEIGHTS: {}'.format(opt_ensemble_weights))
+    y_val_preds = np.c_[logreg_val_preds, cnn_val_preds]
+    y_test_preds = np.c_[logreg_test_preds, cnn_test_preds]
+    opt_weights1, acc_val1 = calculate_optimal_weights(y_val, y_val_preds, 500)
+    acc_test1 = accuracy_score(opt_weights1, y_test, y_test_preds)
 
-    opt_ensemble_weights = [1/2, 1/2, 0]
-    acc_ensemble_pred = accuracy_score(opt_ensemble_weights, y_test, y_test_preds)
-    print('\nENSEMBLE LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(acc_ensemble_pred))
-    print('\nOPTIMAL WEIGHTS: {}'.format(opt_ensemble_weights))
+    y_val_preds = np.c_[linearsvc_val_preds, logreg_val_preds]
+    y_test_preds = np.c_[linearsvc_test_preds, logreg_test_preds]
+    opt_weights2, acc_val2 = calculate_optimal_weights(y_val, y_val_preds, 500)
+    acc_test2 = accuracy_score(opt_weights2, y_test, y_test_preds)
+
+    print('\nENSEMBLE LINEAR SVC + 1D CNN VALIDATION SCORE: {:.4f}'.format(acc_val0))
+    print('\nENSEMBLE LINEAR SVC + 1D CNN TEST SCORE: {:.4f}'.format(acc_test0))
+    print('\nOPTIMAL WEIGHTS: {}'.format(opt_weights0))
+
+    print('\nENSEMBLE LOGISTIC REGRESSION + 1D CNN VALIDATION SCORE: {:.4f}'.format(acc_val1))
+    print('\nENSEMBLE LOGISTIC REGRESSION + 1D CNN TEST SCORE: {:.4f}'.format(acc_test1))
+    print('\nOPTIMAL WEIGHTS: {}'.format(opt_weights1))
+
+    print('\nENSEMBLE LINEAR SVC + LOGISTIC REGRESSION VALIDATION SCORE: {:.4f}'.format(acc_val2))
+    print('\nENSEMBLE LINEAR SVC + LOGISTIC REGRESSION TEST SCORE: {:.4f}'.format(acc_test2))
+    print('\nOPTIMAL WEIGHTS: {}'.format(opt_weights2))
 
 
-def sweep_linear_models(x_train, y_train):
+def sweep_linear_models(x, y):
     model = LinearSVC(random_state=0, dual=False)
     param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100]}
     grid_search = GridSearchCV(model, param_grid, cv=5)
-    grid_search.fit(x_train, y_train)
+    grid_search.fit(x, y)
     print('LINEAR SVC')
     print("Best parameters: {}".format(grid_search.best_params_))
     print("Best cross-validation score: {:.4f}".format(grid_search.best_score_))
@@ -121,7 +134,7 @@ def sweep_linear_models(x_train, y_train):
     model = LogisticRegression(random_state=0)
     param_grid = {'C': [0.001, 0.01, 0.1, 1, 10, 100]}
     grid_search = GridSearchCV(model, param_grid, cv=5)
-    grid_search.fit(x_train, y_train)
+    grid_search.fit(x, y)
     print('LOGISTIC REGRESSION')
     print("Best parameters: {}".format(grid_search.best_params_))
     print("Best cross-validation score: {:.4f}".format(grid_search.best_score_))
@@ -152,20 +165,20 @@ def dataframe_modification_and_split(df, visualization, max_words_review, vocabu
     df['Sentiment'] = np.where(df['Rating'] > 3, 1, 0)
     x_train, x_test, y_train, y_test = train_test_split(df['Review'], df['Sentiment'], test_size=0.2,
                                                         shuffle=True, stratify=df['Sentiment'], random_state=0)
-    x_train2, x_val, y_train2, y_val = train_test_split(x_train, y_train, test_size=0.2,
-                                                        shuffle=True, stratify=y_train, random_state=0)
+    x_trainval, x_val, y_trainval, y_val = train_test_split(x_train, y_train, test_size=0.2,
+                                                            shuffle=True, stratify=y_train, random_state=0)
     grouped = df.groupby(['Sentiment']).size()
     weights = grouped.values
     visualization.pie_plot(['negative', 'positive'], weights, 'Sentiment', 'full set')
     visualization.pie_plot(['positive', 'negative'],
-                           [sum(y_train), len(y_train)-sum(y_train)], 'Sentiment', 'train set')
+                           [sum(y_train), len(y_train) - sum(y_train)], 'Sentiment', 'train set')
     visualization.pie_plot(['positive', 'negative'],
-                           [sum(y_train2), len(y_train2) - sum(y_train2)], 'Sentiment', 'train neural network set')
-    visualization.pie_plot(['positive', 'negative'], [sum(y_test), len(y_test)-sum(y_test)], 'Sentiment', 'test set')
+                           [sum(y_trainval), len(y_trainval) - sum(y_trainval)], 'Sentiment', 'train val set')
+    visualization.pie_plot(['positive', 'negative'], [sum(y_test), len(y_test) - sum(y_test)], 'Sentiment', 'test set')
     visualization.pie_plot(['positive', 'negative'], [sum(y_val), len(y_val) - sum(y_val)], 'Sentiment', 'val set')
 
     hashing = layers.Hashing(num_bins=vocabulary_words, output_mode='int')
-    x_train_enc = [hashing(review.split()) for review in x_train2]
+    x_train_enc = [hashing(review.split()) for review in x_trainval]
     x_train_keras = pad_sequences(x_train_enc, maxlen=max_words_review, padding='post')
     x_val_enc = [hashing(review.split()) for review in x_val]
     x_val_keras = pad_sequences(x_val_enc, maxlen=max_words_review, padding='post')
@@ -173,17 +186,17 @@ def dataframe_modification_and_split(df, visualization, max_words_review, vocabu
     x_test_keras = pad_sequences(x_test_enc, maxlen=max_words_review, padding='post')
 
     vect = CountVectorizer(min_df=10, max_df=0.75, stop_words='english')
-    vect.fit(x_train)
-    x_train = vect.transform(x_train).toarray()
+    vect.fit(x_trainval)
     x_test = vect.transform(x_test).toarray()
     x_val = vect.transform(x_val).toarray()
+    x_trainval = vect.transform(x_trainval).toarray()
     features = vect.vocabulary_
+
     y_test = y_test.reset_index(drop=True)
     y_val = y_val.reset_index(drop=True)
-    y_train = y_train.reset_index(drop=True)
-    y_train2 = y_train2.reset_index(drop=True)
+    y_trainval = y_trainval.reset_index(drop=True)
 
-    return x_train, x_test, x_val, y_train, y_test, x_train_keras, x_val_keras, y_train2, y_val, x_test_keras, features
+    return x_trainval, x_train_keras, x_test, x_test_keras, x_val, x_val_keras, y_trainval, y_test, y_val, features
 
 
 def data_analytics(df, visualization):
@@ -201,12 +214,12 @@ def data_analytics(df, visualization):
     for rating in ratings:
         data = df[df['Rating'] == rating]['Review']
         list_length.append([len(data.tolist()[i].split()) for i in range(len(data))])
-        lengths.append(np.array(list_length[rating-1]).mean())
+        lengths.append(np.array(list_length[rating - 1]).mean())
         vect.fit(data)
         bag_of_words = vect.transform(data).toarray()
         print(f'Number of words with rating {rating}: {bag_of_words.shape[1]}')
         repeat.append(np.sum(bag_of_words, axis=0))
-        repeat_ind.append(np.argsort(-repeat[rating-1]))
+        repeat_ind.append(np.argsort(-repeat[rating - 1]))
         features.append(vect.get_feature_names_out())
 
     visualization.plot_most_common_words(ratings, repeat, repeat_ind, features, 25, 'Most common')
@@ -247,7 +260,8 @@ def data_analytics(df, visualization):
     for i in range(len(sent)):
         sent_rep = []
         for word in feat_sentiment[i]:
-            sent_rep.append(repeat[i*3][features[i*3].tolist().index(word)] + repeat[i*3+1][features[i*3+1].tolist().index(word)])
+            sent_rep.append(repeat[i * 3][features[i * 3].tolist().index(word)] + repeat[i * 3 + 1][
+                features[i * 3 + 1].tolist().index(word)])
         sent_repeat.append(np.array(sent_rep))
         sent_repeat_ind.append(np.argsort(-sent_repeat[i]))
     visualization.plot_most_common_words(sent, sent_repeat, sent_repeat_ind, feat_sentiment, 25, 'Sentiment')
